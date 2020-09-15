@@ -44,44 +44,50 @@ void printInput(Input &input) {
     std::cout << "The replacement algorithm is " << input.m_replaceAlgo << ".\n\n";
 }
 
-//Evict a page and return index of free frame
-int evict(std::vector<Page> &frameTable,const std::string &replaceAlgo,std::deque<Page> &queuePages,std::queue<Page> &fifoPages,
-          std::ifstream &randomIntFile, int evictTime,Process &process) {
-    int freeFrame;
+//Get frame to evict
+int frameToEvict(std::vector<Page> &frameTable,const std::string &replaceAlgo,std::deque<Page> &queuePages,
+                 std::queue<Page> &fifoPages, std::ifstream &randomIntFile) {
+    int evictFrame;
+
     //If FIFO
     if (replaceAlgo=="lru") {
-        freeFrame = queuePages.front().frameNum();
+        evictFrame = queuePages.front().frameNum();
         queuePages.pop_front();
     }
-    //Else if LRU
+        //Else if LRU
     else if (replaceAlgo=="fifo") {
-        freeFrame = fifoPages.front().frameNum();
+        evictFrame = fifoPages.front().frameNum();
         fifoPages.pop();
     }
-    //Else RANDOM
+        //Else RANDOM
     else {
         //Get next random int
         std::string line;
         getline(randomIntFile, line);
         int r = stoi(line);
 
-        freeFrame = r % frameTable.size();
+        evictFrame = r % frameTable.size();
     }
+
+    return evictFrame;
+}
+
+//Evict a frame
+void evictFrame(Process &process, std::vector<Page> &frameTable, int evictTime, int freeFrame) {
     //Increment eviction count for process
     process.evicINC();
     //Sum residency time for process whose page was evicted
     process.addResidentTime(evictTime - frameTable[freeFrame].loadTime());
-
-    return freeFrame;
 }
 
-void pageFault(Process &process, std::vector<Page> &frameTable, std::deque<Page> &queuePages, std::queue<Page> &fifoPages,
-        int pageNum, const std::string &replaceAlgo, int time, std::ifstream &randomIntFile) {
+//Page fault occured
+void pageFault(std::unordered_map<int,Process> &processes, int processNum, std::vector<Page> &frameTable, std::deque<Page> &queuePages,
+        std::queue<Page> &fifoPages, int pageNum, const std::string &replaceAlgo, int time, std::ifstream &randomIntFile) {
 
     //Indicate first free frame
     std::pair<bool,int> freeFrame(false,frameTable.size()-1);
 
-    //Iterate to find first free frame
+    //Iterate to find first free frame (if any)
     for (int i = frameTable.size()-1; i>-1; --i, --freeFrame.second) {
         if (frameTable[i].process()==-1 && !freeFrame.first) {
             freeFrame.first = true;
@@ -91,11 +97,13 @@ void pageFault(Process &process, std::vector<Page> &frameTable, std::deque<Page>
 
     //If there are no free frames
     if (!freeFrame.first) {
-        //Evict page and return free frame
-        freeFrame.second = evict(frameTable,replaceAlgo,queuePages,fifoPages,randomIntFile,time,process);
+        //Find frame to evict
+        freeFrame.second = frameToEvict(frameTable, replaceAlgo, queuePages, fifoPages, randomIntFile);
+        //Evict frame
+        evictFrame(processes[frameTable[freeFrame.second].process()], frameTable, time, freeFrame.second);
     }
     //Add page to frame
-    frameTable[freeFrame.second] = Page(process.processNum(),pageNum,time,freeFrame.second);
+    frameTable[freeFrame.second] = Page(processNum, pageNum, time, freeFrame.second);
 
     //Push frames onto stack or queue to keep track of which page was operated on
     if (replaceAlgo=="lru")
@@ -105,8 +113,8 @@ void pageFault(Process &process, std::vector<Page> &frameTable, std::deque<Page>
 }
 
 //Check if memory reference causes page fault
-bool isPageFault(Process &process, std::vector<Page> &frameTable, int pageNum, int time,
-        const std::string &replaceAlgo, std::ifstream &randomIntFile) {
+bool isPageFault(std::unordered_map<int,Process> &processes, int processNum, int pageNum, std::vector<Page> &frameTable,
+                 int time, const std::string &replaceAlgo, std::ifstream &randomIntFile) {
 
     //Queue of pages for LRU
     static std::deque<Page> queuePages;
@@ -116,11 +124,11 @@ bool isPageFault(Process &process, std::vector<Page> &frameTable, int pageNum, i
     //Iterate to find whether page exists in frameTable
     for (int i = frameTable.size()-1; i>-1; --i) {
         //Page exists
-        if (frameTable[i].process()==process.processNum() && frameTable[i].pageNum()==pageNum) {
+        if (frameTable[i].process()==processNum && frameTable[i].pageNum()==pageNum) {
             //If algorithm is LRU, iterate over queuePages and delete the used frame
             if (replaceAlgo=="lru") {
                 for (int frame = 0; frame < queuePages.size(); ++frame) {
-                    if (queuePages[frame].process()==process.processNum() && queuePages[frame].pageNum()==pageNum) {
+                    if (queuePages[frame].process()==processNum && queuePages[frame].pageNum()==pageNum) {
                         //Push frame to back of deque, since it's been used
                         queuePages.push_back(frameTable[queuePages[frame].frameNum()]);
                         //Then, erase the first instance of the frame from deque
@@ -134,10 +142,12 @@ bool isPageFault(Process &process, std::vector<Page> &frameTable, int pageNum, i
     }
 
     //There is a page fault
-    pageFault(process, frameTable, queuePages, fifoPages, pageNum, replaceAlgo, time, randomIntFile);
+    pageFault(processes, processNum, frameTable, queuePages, fifoPages, pageNum, replaceAlgo, time, randomIntFile);
 
     return true;
 }
+
+//void SETNEXTMEMREF    SETNEXTMEMREF   SETNEXTMEMREF   SETNEXTMEMREF   SETNEXTMEMREF   SETNEXTMEMREF
 
 //Driver for simulating demand paging
 void driver(const Input &input, std::ifstream &randomIntFile, std::unordered_map<int,Process> &processes) {
@@ -159,7 +169,6 @@ void driver(const Input &input, std::ifstream &randomIntFile, std::unordered_map
     while (currentNumRef < totalNumRef + 1) {
         //Iterate through processes
         for (int processNum = 1; processNum<processes.size()+1; ++processNum) {
-            processes[processNum].setProcessNum(processNum);
             //Quantum of 3 for each process
             for (int QUANTUM = 3; QUANTUM > 0 && processes[processNum].refMade() < input.m_numRef; --QUANTUM) {
                 //Check whether process made any memory references
@@ -174,7 +183,7 @@ void driver(const Input &input, std::ifstream &randomIntFile, std::unordered_map
                 int pageNum = word / input.m_pageSize;
 
                 //Check if memory reference causes page fault (demand paging simulator). If page fault, increment fault time
-                if (isPageFault(processes[processNum], frameTable, pageNum, currentNumRef, input.m_replaceAlgo, randomIntFile)) {
+                if (isPageFault(processes, processNum, pageNum, frameTable, currentNumRef, input.m_replaceAlgo, randomIntFile)) {
                     processes[processNum].faultINC();
                 }
 
@@ -259,15 +268,11 @@ int main(int argc, char *argv[]) {
 
     //Open random int file
     std::ifstream randomIntFile("data/random-numbers");
-    //Read random int file
+
     if (randomIntFile.is_open()) {
-        //Print description of input
         printInput(input);
-        //Start driver
         driver(input, randomIntFile, processes);
-        //Print result
         printResults(processes);
-        //Close random int file
         randomIntFile.close();
     }
 }

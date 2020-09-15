@@ -59,8 +59,6 @@ public:
     int refMade() const;
     //Increment m_RefMade
     void refINC();
-    //Set m_Process
-    void setProcessNum(int processNum);
     //Get m_Process
     int processNum() const;
 };

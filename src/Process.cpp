@@ -80,10 +80,6 @@ int Process::refMade() const {
 void Process::refINC() {
     ++m_RefMade;
 }
-//Set m_Process
-void Process::setProcessNum(int processNum) {
-    m_Process = processNum;
-}
 //Get m_Process
 int Process::processNum() const {
     return m_Process;

@@ -8,8 +8,6 @@ To compile program:
 
 `$ g++ -std=c++0x -o a.out main.cpp Page.cpp Process.cpp`
 
-I am assuming that the "random-numbers" file is in the same directory as "main.cpp".
-
 To run the executable:
 
 `$ ./a.out M P S J N R`
